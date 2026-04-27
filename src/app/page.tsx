@@ -1,11 +1,11 @@
 import {
-  fetchHistory,
-  fetchLatestRecommendation,
+  fetchHistoryGrouped,
+  fetchLatestWeekTrades,
   fetchMarketState,
 } from "@/lib/queries";
 import { hasSupabaseEnv } from "@/lib/supabase";
-import RecommendationCard from "@/components/RecommendationCard";
-import HistoryTable from "@/components/HistoryTable";
+import TopTrades from "@/components/TopTrades";
+import WeeklyHistory from "@/components/WeeklyHistory";
 import MarketView from "@/components/MarketView";
 import Footer from "@/components/Footer";
 import NoConfig from "@/components/NoConfig";
@@ -16,21 +16,26 @@ export const dynamic = "force-dynamic";
 export default async function Page() {
   if (!hasSupabaseEnv()) {
     return (
-      <main className="mx-auto max-w-5xl px-6 py-12">
+      <main className="mx-auto max-w-5xl px-4 py-10 sm:px-6 sm:py-12">
         <NoConfig />
       </main>
     );
   }
 
-  let latest = null;
-  let history: Awaited<ReturnType<typeof fetchHistory>> = [];
+  let latest: Awaited<ReturnType<typeof fetchLatestWeekTrades>> = {
+    week_start: null,
+    trades: [],
+    market_view: null,
+    market_regime: null,
+  };
+  let history: Awaited<ReturnType<typeof fetchHistoryGrouped>> = [];
   let market = null;
   let dbError: string | null = null;
 
   try {
     [latest, history, market] = await Promise.all([
-      fetchLatestRecommendation(),
-      fetchHistory(20),
+      fetchLatestWeekTrades(),
+      fetchHistoryGrouped(12),
       fetchMarketState(),
     ]);
   } catch (e) {
@@ -38,8 +43,8 @@ export default async function Page() {
   }
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-10 sm:py-14">
-      <header className="mb-10">
+    <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-14">
+      <header className="mb-8 sm:mb-10">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-bull-500 to-bull-700 ring-1 ring-bull-500/30" />
@@ -48,26 +53,22 @@ export default async function Page() {
                 Grok High-Conviction
               </div>
               <div className="text-xs text-gray-400">
-                One disciplined trade per week. Or no trade at all.
+                Top 3 disciplined trades each week. Or none at all.
               </div>
             </div>
           </div>
-          <a
-            href="https://github.com"
-            className="text-xs text-gray-400 hover:text-gray-200"
-          >
-            v1.0
-          </a>
+          <span className="text-xs text-gray-500">v2.0</span>
         </div>
       </header>
 
-      <section className="mb-10 text-center">
-        <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-5xl">
-          This Week’s High-Conviction Recommendation
+      <section className="mb-8 text-center sm:mb-10">
+        <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-5xl">
+          This Week&rsquo;s Top 3 High-Conviction Trades
         </h1>
-        <p className="mx-auto mt-4 max-w-2xl text-base text-gray-400">
+        <p className="mx-auto mt-3 max-w-2xl text-sm text-gray-400 sm:mt-4 sm:text-base">
           Four competing AI agents debate every Sunday night. Only setups that
-          pass all 8 strict filters become a trade. Most weeks: no trade.
+          pass at least 7 of 8 strict filters become a trade. Most weeks: only a
+          handful qualify.
         </p>
       </section>
 
@@ -78,9 +79,14 @@ export default async function Page() {
         </div>
       ) : (
         <>
-          <RecommendationCard rec={latest} />
-          <MarketView state={market} latest={latest} />
-          <HistoryTable rows={history} />
+          <TopTrades trades={latest.trades} weekStart={latest.week_start} />
+          <MarketView
+            state={market}
+            view={latest.market_view}
+            regime={latest.market_regime}
+            tradeType={latest.trades[0]?.type ?? null}
+          />
+          <WeeklyHistory groups={history} />
         </>
       )}
 
