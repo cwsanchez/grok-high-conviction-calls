@@ -4,6 +4,7 @@ import { getSupabase } from "@/lib/supabase";
 import { mostRecentMonday } from "@/lib/dates";
 import { updatePastPerformance } from "@/lib/performance";
 import { SYSTEM_PROMPTS } from "@/lib/prompts";
+import type { AgentReport, RankedTrade } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,6 +33,43 @@ async function upsertSystemPrompts(): Promise<void> {
   if (error) console.error("system_prompts upsert error", error);
 }
 
+function buildReasoning(
+  trade: RankedTrade,
+  agents: Record<string, AgentReport>
+): string {
+  const checklistLines = Object.entries(trade.checklist)
+    .filter(([k]) => k !== "passed_count" && k !== "all_passed")
+    .map(([k, v]) => {
+      const item = v as { pass: boolean; detail: string };
+      return `- ${item.pass ? "PASS" : "FAIL"} ${k}: ${item.detail}`;
+    });
+
+  return [
+    trade.reasoning ?? "",
+    "",
+    "Why this ranks here:",
+    trade.rank_explanation || "—",
+    "",
+    "Agent Debate Summary:",
+    `- Bull: ${agents.bull?.summary ?? ""}`,
+    `- Bear: ${agents.bear?.summary ?? ""}`,
+    `- Risk: ${agents.risk?.summary ?? ""}`,
+    `- Historian: ${agents.historian?.summary ?? ""}`,
+    "",
+    `8-Point Checklist (${trade.checklist.passed_count}/8 passed):`,
+    ...checklistLines,
+  ].join("\n");
+}
+
+async function clearWeek(weekStart: string): Promise<void> {
+  const supabase = getSupabase();
+  const { error } = await supabase
+    .from("recommendations")
+    .delete()
+    .eq("week_start", weekStart);
+  if (error) console.error("clearWeek error", error);
+}
+
 async function runJob() {
   const weekStart = mostRecentMonday();
 
@@ -55,84 +93,86 @@ async function runJob() {
     console.error("market_state insert error", marketStateInsert.error);
   }
 
-  let recId: number | null = null;
-  if (final.trade && final.asset && final.type && final.expiration) {
-    const reasoningWithAgents = [
-      final.reasoning ?? "",
-      "",
-      "Agent Debate Summary:",
-      `- Bull: ${(agents as Record<string, { summary?: string }>).bull?.summary ?? ""}`,
-      `- Bear: ${(agents as Record<string, { summary?: string }>).bear?.summary ?? ""}`,
-      `- Risk: ${(agents as Record<string, { summary?: string }>).risk?.summary ?? ""}`,
-      `- Historian: ${(agents as Record<string, { summary?: string }>).historian?.summary ?? ""}`,
-      "",
-      "8-Point Checklist:",
-      ...Object.entries(final.checklist)
-        .filter(([k]) => k !== "passed_count" && k !== "all_passed")
-        .map(([k, v]) => {
-          const item = v as { pass: boolean; detail: string };
-          return `- ${item.pass ? "PASS" : "FAIL"} ${k}: ${item.detail}`;
-        }),
-    ].join("\n");
+  // Replace this week's rows so re-runs are idempotent.
+  await clearWeek(weekStart);
 
+  const insertedIds: number[] = [];
+
+  if (final.trades.length >= 2) {
+    const rows = final.trades.map((t) => ({
+      week_start: weekStart,
+      rank: t.rank,
+      asset: t.asset,
+      type: t.type.toLowerCase(),
+      strike: t.strike,
+      expiration: t.expiration,
+      entry_price: t.entry_price,
+      profit_target: t.profit_target,
+      stop_loss: t.stop_loss,
+      max_risk: t.max_risk,
+      confidence: t.confidence,
+      strength_score: t.strength_score,
+      rating: t.rating,
+      risk_level: t.risk_level,
+      rank_explanation: t.rank_explanation,
+      reasoning: buildReasoning(t, agents),
+      price_at_recommendation: t.price_at_recommendation || null,
+      market_view: final.market_view,
+      market_regime: final.market_regime,
+      checklist_passed_count: t.checklist.passed_count,
+      performance_status: "pending",
+      actual_pnl: null,
+      created_at: new Date().toISOString(),
+    }));
     const { data, error } = await supabase
       .from("recommendations")
-      .upsert(
-        {
-          week_start: weekStart,
-          asset: final.asset,
-          type: (final.type ?? "").toLowerCase(),
-          strike: final.strike ?? 0,
-          expiration: final.expiration,
-          entry_price: final.entry_price ?? 0,
-          profit_target: final.profit_target ?? 0,
-          stop_loss: final.stop_loss ?? 0,
-          confidence: final.confidence ?? 0,
-          reasoning: reasoningWithAgents,
-          performance_status: "pending",
-          actual_pnl: null,
-          created_at: new Date().toISOString(),
-        },
-        { onConflict: "week_start" }
-      )
-      .select("id")
-      .single();
+      .insert(rows)
+      .select("id");
     if (error) {
-      console.error("recommendation upsert error", error);
+      console.error("recommendations insert error", error);
     } else {
-      recId = (data as { id: number }).id;
+      for (const r of (data ?? []) as Array<{ id: number }>) {
+        insertedIds.push(r.id);
+      }
     }
   } else {
-    const noTradeReason =
-      final.why_no_trade ?? "Setup did not pass all 8 checklist items this week.";
-    const { error } = await supabase.from("recommendations").upsert(
-      {
-        week_start: weekStart,
-        asset: "NONE",
-        type: "none",
-        strike: 0,
-        expiration: weekStart,
-        entry_price: 0,
-        profit_target: 0,
-        stop_loss: 0,
-        confidence: final.confidence ?? 0,
-        reasoning: `NO TRADE THIS WEEK\n\n${noTradeReason}\n\nMarket view: ${final.market_view}`,
-        performance_status: "no_trade",
-        actual_pnl: 0,
-        created_at: new Date().toISOString(),
-      },
-      { onConflict: "week_start" }
-    );
+    const reason =
+      final.why_no_trades ??
+      "Setup did not produce enough qualifying trades this week.";
+    const { error } = await supabase.from("recommendations").insert({
+      week_start: weekStart,
+      rank: 1,
+      asset: "NONE",
+      type: "none",
+      strike: 0,
+      expiration: weekStart,
+      entry_price: 0,
+      profit_target: 0,
+      stop_loss: 0,
+      max_risk: 0,
+      confidence: 0,
+      strength_score: null,
+      rating: null,
+      risk_level: null,
+      rank_explanation: null,
+      reasoning: `LIMITED OPPORTUNITIES THIS WEEK\n\n${reason}\n\nMarket view: ${final.market_view}`,
+      price_at_recommendation: null,
+      market_view: final.market_view,
+      market_regime: final.market_regime,
+      checklist_passed_count: null,
+      performance_status: "no_trade",
+      actual_pnl: 0,
+      created_at: new Date().toISOString(),
+    });
     if (error) console.error("no-trade row insert error", error);
   }
 
   return {
     week_start: weekStart,
-    trade: final.trade,
-    asset: final.asset ?? null,
-    confidence: final.confidence ?? null,
-    checklist_passed: final.checklist.passed_count,
-    rec_id: recId,
+    trades_count: final.trades.length,
+    assets: final.trades.map((t) => `${t.rank}:${t.asset}`),
+    market_regime: final.market_regime,
+    inserted_ids: insertedIds,
     performance_updated: perfResult.updated,
   };
 }

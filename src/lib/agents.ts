@@ -1,6 +1,13 @@
 import { callGrok, extractJson } from "./grok";
 import { SYSTEM_PROMPTS } from "./prompts";
-import type { AgentReport, ChecklistResult, FinalRecommendation } from "./types";
+import type {
+  AgentReport,
+  ChecklistResult,
+  FinalAnalysis,
+  RankedTrade,
+  RiskLevel,
+  TradeRating,
+} from "./types";
 
 function todayISO(): string {
   return new Date().toISOString().slice(0, 10);
@@ -21,14 +28,60 @@ async function runAgent(
       { role: "system", content: SYSTEM_PROMPTS[name] },
       { role: "user", content: userTaskTemplate(today) },
     ],
-    { temperature: 0.5, jsonMode: true, maxTokens: 1400 }
+    { temperature: 0.5, jsonMode: true, maxTokens: 1600 }
   );
   return extractJson(content);
 }
 
+const CHECKLIST_KEYS: Array<keyof ChecklistResult> = [
+  "trend_alignment",
+  "momentum",
+  "iv_rank",
+  "liquidity",
+  "binary_events",
+  "sentiment",
+  "historical_pattern",
+  "confidence_threshold",
+];
+
+const VALID_RATINGS: TradeRating[] = [
+  "Strong Buy",
+  "Moderate",
+  "Weak",
+  "Skip",
+];
+const VALID_RISK: RiskLevel[] = ["Low", "Medium", "High"];
+
+interface RawTrade {
+  rank?: number;
+  asset?: string;
+  type?: string;
+  expiration?: string;
+  strike?: number;
+  entry_price?: number;
+  profit_target?: number;
+  stop_loss?: number;
+  max_risk?: number;
+  confidence?: number;
+  strength_score?: number;
+  rating?: string;
+  risk_level?: string;
+  rank_explanation?: string;
+  reasoning?: string;
+  price_at_recommendation?: number;
+  checklist?: Partial<ChecklistResult>;
+}
+
+interface RawJudge {
+  trades?: RawTrade[];
+  market_view?: string;
+  market_regime?: string;
+  why_no_trades?: string;
+}
+
 export async function runWeeklyAnalysis(): Promise<{
-  agents: ReturnType<typeof Object.fromEntries>;
-  final: FinalRecommendation;
+  agents: Record<string, AgentReport>;
+  final: FinalAnalysis;
 }> {
   const today = todayISO();
 
@@ -41,7 +94,7 @@ export async function runWeeklyAnalysis(): Promise<{
 
   const judgeUser = `Today is ${today}.
 
-Below are the four agent reports for this week. Synthesize them into a SINGLE high-conviction recommendation, or skip the week. Apply the strict 8-point checklist. Default strongly to long CALLS; only recommend a long PUT in extremely clear and strong bearish conditions.
+Below are the four agent reports for this week. Synthesize them into the TOP 3 highest-quality trade ideas (or fewer if quality setups don't exist). Apply the strict 8-point checklist; only include trades that pass at least 7 of 8 points. Default strongly to long CALLS; only recommend a long PUT in extremely clear and strong bearish conditions.
 
 BULL REPORT:
 ${JSON.stringify(bull, null, 2)}
@@ -55,19 +108,19 @@ ${JSON.stringify(risk, null, 2)}
 HISTORIAN REPORT:
 ${JSON.stringify(historian, null, 2)}
 
-Return JSON only.`;
+Return JSON only with the schema described in the system prompt.`;
 
   const judgeRaw = await callGrok(
     [
       { role: "system", content: SYSTEM_PROMPTS.judge },
       { role: "user", content: judgeUser },
     ],
-    { temperature: 0.2, jsonMode: true, maxTokens: 1600 }
+    { temperature: 0.2, jsonMode: true, maxTokens: 4000 }
   );
 
-  const judged = extractJson<FinalRecommendation>(judgeRaw);
+  const judged = extractJson<RawJudge>(judgeRaw);
 
-  const final = enforceChecklist(judged);
+  const final = enforceTopTrades(judged);
 
   return {
     agents: { bull, bear, risk, historian },
@@ -75,20 +128,7 @@ Return JSON only.`;
   };
 }
 
-export function enforceChecklist(r: FinalRecommendation): FinalRecommendation {
-  const c = r.checklist as Partial<ChecklistResult> | undefined;
-  const items: Array<keyof ChecklistResult> = [
-    "trend_alignment",
-    "momentum",
-    "iv_rank",
-    "liquidity",
-    "binary_events",
-    "sentiment",
-    "historical_pattern",
-    "confidence_threshold",
-  ];
-
-  let passed = 0;
+function normalizeChecklist(raw: Partial<ChecklistResult> | undefined): ChecklistResult {
   const normalized: ChecklistResult = {
     trend_alignment: { pass: false, detail: "missing" },
     momentum: { pass: false, detail: "missing" },
@@ -101,9 +141,9 @@ export function enforceChecklist(r: FinalRecommendation): FinalRecommendation {
     passed_count: 0,
     all_passed: false,
   };
-
-  for (const key of items) {
-    const v = (c as Record<string, { pass?: boolean; detail?: string }> | undefined)?.[key];
+  let passed = 0;
+  for (const key of CHECKLIST_KEYS) {
+    const v = (raw as Record<string, { pass?: boolean; detail?: string }> | undefined)?.[key];
     const pass = Boolean(v?.pass);
     const detail = String(v?.detail ?? "missing");
     (normalized as unknown as Record<string, { pass: boolean; detail: string }>)[key] = {
@@ -112,47 +152,129 @@ export function enforceChecklist(r: FinalRecommendation): FinalRecommendation {
     };
     if (pass) passed++;
   }
-
   normalized.passed_count = passed;
-  normalized.all_passed = passed === items.length;
+  normalized.all_passed = passed === CHECKLIST_KEYS.length;
+  return normalized;
+}
 
-  let trade = Boolean(r.trade) && normalized.all_passed;
+function clampRating(r: string | undefined, passed: number, confidence: number): TradeRating {
+  if (r && (VALID_RATINGS as string[]).includes(r)) {
+    if (r === "Skip") {
+      // Skip should not appear in trades; downgrade to Weak.
+      return passed >= 7 ? "Moderate" : "Weak";
+    }
+    return r as TradeRating;
+  }
+  if (passed === 8 && confidence >= 85) return "Strong Buy";
+  if (passed >= 7 && confidence >= 80) return "Moderate";
+  return "Weak";
+}
 
-  if (trade && (r.confidence ?? 0) < 82) {
-    trade = false;
-    normalized.confidence_threshold = {
-      pass: false,
-      detail: `Confidence ${r.confidence ?? 0} below 82 threshold`,
+function clampRisk(r: string | undefined): RiskLevel {
+  if (r && (VALID_RISK as string[]).includes(r)) return r as RiskLevel;
+  return "Medium";
+}
+
+function clampStrength(s: number | undefined, passed: number, confidence: number): number {
+  if (typeof s === "number" && isFinite(s) && s > 0) {
+    return Math.max(1, Math.min(10, Math.round(s * 10) / 10));
+  }
+  // Fallback: derive from passed + confidence.
+  const base = passed >= 8 ? 8.5 : passed >= 7 ? 7.0 : 5.0;
+  const conf = Math.max(0, Math.min(20, (confidence - 75) / 2));
+  return Math.max(1, Math.min(10, Math.round((base + conf / 4) * 10) / 10));
+}
+
+function isComplete(t: RawTrade): boolean {
+  const required: Array<keyof RawTrade> = [
+    "asset",
+    "type",
+    "expiration",
+    "strike",
+    "entry_price",
+    "profit_target",
+    "stop_loss",
+  ];
+  for (const k of required) {
+    const v = t[k];
+    if (v == null || v === "") return false;
+  }
+  return true;
+}
+
+export function enforceTopTrades(judged: RawJudge): FinalAnalysis {
+  const market_view = String(judged.market_view ?? "");
+  const market_regime = String(judged.market_regime ?? "neutral");
+
+  const rawTrades: RawTrade[] = Array.isArray(judged.trades) ? judged.trades : [];
+
+  const qualified: RankedTrade[] = [];
+  for (const t of rawTrades) {
+    if (!isComplete(t)) continue;
+    const checklist = normalizeChecklist(t.checklist);
+    if (checklist.passed_count < 7) continue;
+
+    const typeUpper = String(t.type ?? "").toUpperCase();
+    if (typeUpper !== "CALL" && typeUpper !== "PUT") continue;
+
+    const confidence = Math.max(0, Math.min(100, Math.round(Number(t.confidence ?? 0))));
+    if (confidence < 80) continue;
+
+    const entry = Number(t.entry_price ?? 0);
+    const target = Number(t.profit_target ?? 0);
+    const stop = Number(t.stop_loss ?? 0);
+    if (entry <= 0 || target <= 0 || stop <= 0) continue;
+
+    const maxRisk =
+      Number.isFinite(Number(t.max_risk)) && Number(t.max_risk) > 0
+        ? Number(t.max_risk)
+        : Math.max(0, (entry - stop) * 100);
+
+    const trade: RankedTrade = {
+      rank: 0,
+      asset: String(t.asset),
+      type: typeUpper as "CALL" | "PUT",
+      expiration: String(t.expiration),
+      strike: Number(t.strike),
+      entry_price: entry,
+      profit_target: target,
+      stop_loss: stop,
+      max_risk: Math.round(maxRisk * 100) / 100,
+      confidence,
+      strength_score: clampStrength(t.strength_score, checklist.passed_count, confidence),
+      rating: clampRating(t.rating, checklist.passed_count, confidence),
+      risk_level: clampRisk(t.risk_level),
+      rank_explanation: String(t.rank_explanation ?? ""),
+      reasoning: String(t.reasoning ?? ""),
+      price_at_recommendation:
+        Number.isFinite(Number(t.price_at_recommendation))
+          ? Number(t.price_at_recommendation)
+          : 0,
+      checklist,
     };
-    normalized.all_passed = false;
-    normalized.passed_count = Math.min(normalized.passed_count, 7);
+    qualified.push(trade);
   }
 
-  if (trade) {
-    const required = [
-      "asset",
-      "type",
-      "expiration",
-      "strike",
-      "entry_price",
-      "profit_target",
-      "stop_loss",
-    ] as const;
-    for (const key of required) {
-      if ((r as unknown as Record<string, unknown>)[key] == null) {
-        trade = false;
-        break;
-      }
-    }
+  qualified.sort((a, b) => {
+    if (b.strength_score !== a.strength_score) return b.strength_score - a.strength_score;
+    return b.confidence - a.confidence;
+  });
+
+  const top = qualified.slice(0, 3).map((t, i) => ({ ...t, rank: i + 1 }));
+
+  let why_no_trades: string | undefined = judged.why_no_trades;
+  if (top.length < 2) {
+    why_no_trades =
+      why_no_trades ||
+      `Only ${top.length} setup${top.length === 1 ? "" : "s"} passed our 7-of-8 checklist this week. Patience is part of the edge — sitting in cash is a position.`;
+  } else {
+    why_no_trades = undefined;
   }
 
   return {
-    ...r,
-    trade,
-    checklist: normalized,
-    why_no_trade:
-      !trade && !r.why_no_trade
-        ? `Only ${normalized.passed_count} of 8 checklist items passed. The setup is not strong enough this week — patience is part of the edge.`
-        : r.why_no_trade,
+    trades: top,
+    market_view,
+    market_regime,
+    why_no_trades,
   };
 }

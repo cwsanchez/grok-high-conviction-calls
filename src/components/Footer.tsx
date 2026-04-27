@@ -5,13 +5,13 @@ export default function Footer() {
         Strategy Rules
       </h3>
       <ul className="mt-3 grid gap-2 sm:grid-cols-2">
-        <li>One trade per week max. Skipping is a feature, not a bug.</li>
+        <li>Up to 3 high-conviction trades per week. Skipping is a feature.</li>
         <li>Default to long calls. Long puts only in strong bear conditions.</li>
         <li>Risk ~1.5% of account per trade ($15 on a $1,000 account).</li>
-        <li>Use a limit order. Never chase the price.</li>
+        <li>Use a limit order at the suggested entry. Never chase.</li>
         <li>Take profit at +75%. Cut losses at −35%.</li>
         <li>Hold ~30–45 day expirations to manage theta.</li>
-        <li>Setup must pass all 8 filters or no trade is recommended.</li>
+        <li>Each trade must pass at least 7 of 8 filters.</li>
         <li>Past performance does not guarantee future results.</li>
       </ul>
       <p className="mt-6 text-[11px] leading-5 text-gray-500">
