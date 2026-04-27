@@ -6,7 +6,7 @@ A simple, transparent Next.js 14 web app that uses Grok + a strict 8-point check
 
 ## How It Works
 
-1. **Every Sunday at 8:00 PM Mountain Time** a Vercel Cron Job calls `/api/cron/weekly`. There is no manual trigger and no settings page.
+1. **Every Sunday at 8:00 PM Mountain Time** a Vercel Cron Job calls `/api/cron/weekly`. A second daily catch-up cron also fires every weekday morning (8 AM MT) and is a no-op if the current week already has recommendations — so if the Sunday run fails or is delayed, the analysis self-heals on the next available day, with prompts tuned for the shorter holding window.
 2. Four AI agents — **Bull**, **Bear**, **Risk**, **Historian** — independently analyze the 12-asset universe using `grok-4-1-fast-reasoning`.
 3. A **Judge** prompt synthesizes their reports, applies an 8-point checklist to every candidate, and returns the **top 3 ranked trades** (or fewer if fewer qualify):
    1. Multi-timeframe trend alignment (above 20/50/200-day MA)
@@ -96,7 +96,12 @@ Useful endpoints:
 
 ## Deploy
 
-Push to GitHub and Vercel auto-deploys. The cron schedule is defined in `vercel.json` (`0 2 * * 1` UTC = 8:00 PM Sunday MT during DST, 7:00 PM during standard time — adjust if needed).
+Push to GitHub and Vercel auto-deploys. The cron schedule is defined in `vercel.json`:
+
+- `0 2 * * 1` (UTC) — primary Sunday 8:00 PM MT (DST) / 7:00 PM MT (standard) run.
+- `0 14 * * 1-5` (UTC) — daily 8:00 AM MT catch-up. If the week already has recommendations, the route returns `skipped: true` immediately; otherwise it runs the analysis with prompts adjusted for the shorter holding window.
+
+Manual trigger: `POST /api/cron/weekly?secret=$CRON_SECRET` (or with `Authorization: Bearer $CRON_SECRET`). Add `?force=1` to overwrite an already-populated week.
 
 ## Disclaimer
 

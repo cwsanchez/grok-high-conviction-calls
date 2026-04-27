@@ -1,5 +1,6 @@
 import { callGrok, extractJson } from "./grok";
 import { SYSTEM_PROMPTS } from "./prompts";
+import { weekContext, type WeekContext } from "./dates";
 import type {
   AgentReport,
   ChecklistResult,
@@ -9,24 +10,36 @@ import type {
   TradeRating,
 } from "./types";
 
-function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
+function describeWeek(ctx: WeekContext): string {
+  if (ctx.tradingDaysRemaining >= 5) {
+    return `This is the FULL upcoming trading week (Mon ${ctx.weekStart} open through Fri ${ctx.weekEnd} close). Five trading days available.`;
+  }
+  if (ctx.tradingDaysRemaining <= 0) {
+    return `The trading week ${ctx.weekStart} → ${ctx.weekEnd} has already closed. You should treat this as a no-trade week unless conviction is exceptional.`;
+  }
+  return `This analysis is starting MID-WEEK. Week of ${ctx.weekStart} → ${ctx.weekEnd}. Only ${ctx.tradingDaysRemaining} trading day${
+    ctx.tradingDaysRemaining === 1 ? "" : "s"
+  } and ~${ctx.hoursRemaining} hours remain until Friday close. Adjust position sizing, profit targets, and stop losses to reflect the shorter holding window. Reduce conviction on slow-moving setups; favor catalysts that could play out in the remaining days. If <2 trading days remain, lean strongly toward "no trade".`;
 }
 
-const userTaskTemplate = (today: string) => `Today is ${today}.
-Analyze the current market for the upcoming week (Monday open through Friday close).
+const userTaskTemplate = (ctx: WeekContext) => `Today is ${ctx.todayIso}.
+Analyze the current market for the trading week of ${ctx.weekStart} (Monday open) through ${ctx.weekEnd} (Friday close).
 Use your best knowledge of recent market action, sector rotation, macro news, and seasonality.
 If exact recent data is uncertain, state your reasoning conservatively and adjust conviction down.
+
+Week timing context:
+${describeWeek(ctx)}
+
 Return JSON only.`;
 
 async function runAgent(
   name: "bull" | "bear" | "risk" | "historian",
-  today: string
+  ctx: WeekContext
 ): Promise<AgentReport & { regime?: string; veto_assets?: string[] }> {
   const content = await callGrok(
     [
       { role: "system", content: SYSTEM_PROMPTS[name] },
-      { role: "user", content: userTaskTemplate(today) },
+      { role: "user", content: userTaskTemplate(ctx) },
     ],
     { temperature: 0.5, jsonMode: true, maxTokens: 1600 }
   );
@@ -79,22 +92,29 @@ interface RawJudge {
   why_no_trades?: string;
 }
 
-export async function runWeeklyAnalysis(): Promise<{
+export async function runWeeklyAnalysis(
+  ctxOverride?: WeekContext
+): Promise<{
   agents: Record<string, AgentReport>;
   final: FinalAnalysis;
 }> {
-  const today = todayISO();
+  const ctx = ctxOverride ?? weekContext();
 
   const [bull, bear, risk, historian] = await Promise.all([
-    runAgent("bull", today),
-    runAgent("bear", today),
-    runAgent("risk", today),
-    runAgent("historian", today),
+    runAgent("bull", ctx),
+    runAgent("bear", ctx),
+    runAgent("risk", ctx),
+    runAgent("historian", ctx),
   ]);
 
-  const judgeUser = `Today is ${today}.
+  const judgeUser = `Today is ${ctx.todayIso}.
+
+You are producing trades for the week of ${ctx.weekStart} → ${ctx.weekEnd}.
+${describeWeek(ctx)}
 
 Below are the four agent reports for this week. Synthesize them into the TOP 3 highest-quality trade ideas (or fewer if quality setups don't exist). Apply the strict 8-point checklist; only include trades that pass at least 7 of 8 points. Default strongly to long CALLS; only recommend a long PUT in extremely clear and strong bearish conditions.
+
+If the week is already in progress, scale profit targets, stop losses, and position sizing for the shorter holding window and prefer ideas with near-term catalysts. If <2 trading days remain in the week, you should usually return an empty trades array.
 
 BULL REPORT:
 ${JSON.stringify(bull, null, 2)}
