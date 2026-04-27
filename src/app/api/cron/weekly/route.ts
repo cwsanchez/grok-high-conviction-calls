@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runWeeklyAnalysis } from "@/lib/agents";
 import { getSupabase } from "@/lib/supabase";
-import { mostRecentMonday } from "@/lib/dates";
+import { weekContext, type WeekContext } from "@/lib/dates";
 import { updatePastPerformance } from "@/lib/performance";
 import { SYSTEM_PROMPTS } from "@/lib/prompts";
 import type { AgentReport, RankedTrade } from "@/lib/types";
@@ -70,8 +70,31 @@ async function clearWeek(weekStart: string): Promise<void> {
   if (error) console.error("clearWeek error", error);
 }
 
-async function runJob() {
-  const weekStart = mostRecentMonday();
+async function weekHasRecommendations(weekStart: string): Promise<boolean> {
+  const supabase = getSupabase();
+  const { count, error } = await supabase
+    .from("recommendations")
+    .select("id", { count: "exact", head: true })
+    .eq("week_start", weekStart);
+  if (error) {
+    console.error("weekHasRecommendations check error", error);
+    return false;
+  }
+  return (count ?? 0) > 0;
+}
+
+async function runJob(opts: { force?: boolean } = {}) {
+  const ctx = weekContext();
+  const { weekStart } = ctx;
+
+  if (!opts.force && (await weekHasRecommendations(weekStart))) {
+    return {
+      week_start: weekStart,
+      skipped: true,
+      reason: "already_has_recommendations",
+      week_context: ctx,
+    };
+  }
 
   await upsertSystemPrompts();
 
@@ -80,7 +103,7 @@ async function runJob() {
     return { updated: 0 };
   });
 
-  const { final, agents } = await runWeeklyAnalysis();
+  const { final, agents } = await runWeeklyAnalysis(ctx);
 
   const supabase = getSupabase();
 
@@ -174,6 +197,7 @@ async function runJob() {
     market_regime: final.market_regime,
     inserted_ids: insertedIds,
     performance_updated: perfResult.updated,
+    week_context: ctx,
   };
 }
 
@@ -182,7 +206,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   try {
-    const result = await runJob();
+    const force = req.nextUrl.searchParams.get("force") === "1";
+    const result = await runJob({ force });
     return NextResponse.json({ ok: true, result });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -194,3 +219,5 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   return GET(req);
 }
+
+export type { WeekContext };

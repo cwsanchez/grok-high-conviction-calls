@@ -24,8 +24,9 @@ export default function TopTrades({
   if (!weekStart) {
     return (
       <div className="glass rounded-2xl p-6 text-sm text-gray-300 sm:rounded-3xl sm:p-8">
-        No analysis has been run yet. The first cycle runs Sunday at 8:00 PM
-        Mountain Time.
+        No analysis has been run yet. The primary cycle runs Sunday at 8:00 PM
+        Mountain Time, with a daily 8:00 AM MT catch-up that self-heals if the
+        Sunday run is missed.
       </div>
     );
   }
