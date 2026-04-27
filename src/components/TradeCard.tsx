@@ -1,4 +1,9 @@
-import type { Recommendation, RiskLevel, TradeRating } from "@/lib/types";
+import type {
+  ExecuteVerdict,
+  Recommendation,
+  RiskLevel,
+  TradeRating,
+} from "@/lib/types";
 import { formatDate, formatPrice } from "@/lib/dates";
 
 const RANK_META: Record<number, { label: string; ribbon: string; ring: string }> = {
@@ -33,6 +38,48 @@ const RISK_STYLES: Record<RiskLevel, string> = {
   Medium: "bg-amber-400/15 text-amber-300 ring-amber-400/30",
   High: "bg-bear-500/15 text-bear-500 ring-bear-500/30",
 };
+
+const EXECUTE_META: Record<
+  ExecuteVerdict,
+  { label: string; blurb: string; styles: string; dot: string }
+> = {
+  "Take It": {
+    label: "Take It",
+    blurb: "Execute with normal sizing.",
+    styles: "bg-bull-500/15 text-bull-500 ring-bull-500/40",
+    dot: "bg-bull-500",
+  },
+  "Small Size": {
+    label: "Small Size",
+    blurb: "Take it, but cut size in half.",
+    styles: "bg-amber-400/15 text-amber-300 ring-amber-400/40",
+    dot: "bg-amber-400",
+  },
+  Watchlist: {
+    label: "Watchlist",
+    blurb: "Don't trade live — paper-trade or wait for confirmation.",
+    styles: "bg-orange-500/15 text-orange-300 ring-orange-500/40",
+    dot: "bg-orange-400",
+  },
+  Pass: {
+    label: "Pass",
+    blurb: "Shown for transparency. Do not execute.",
+    styles: "bg-bear-500/15 text-bear-500 ring-bear-500/40",
+    dot: "bg-bear-500",
+  },
+};
+
+function deriveExecuteVerdict(
+  rec: Recommendation
+): ExecuteVerdict {
+  if (rec.execute_verdict) return rec.execute_verdict;
+  // Fallback for legacy rows that pre-date the execute_verdict field.
+  const rating = (rec.rating ?? "Moderate") as TradeRating;
+  if (rating === "Strong Buy") return "Take It";
+  if (rating === "Moderate") return "Take It";
+  if (rating === "Weak") return "Watchlist";
+  return "Pass";
+}
 
 function StatBlock({
   label,
@@ -151,6 +198,9 @@ export default function TradeCard({ rec }: { rec: Recommendation }) {
   const meta = RANK_META[rank] ?? RANK_META[1];
   const rating = (rec.rating ?? "Moderate") as TradeRating;
   const risk = (rec.risk_level ?? "Medium") as RiskLevel;
+  const executeVerdict = deriveExecuteVerdict(rec);
+  const executeMeta = EXECUTE_META[executeVerdict];
+  const isPlaceholder = !rec.asset || rec.asset === "—" || !rec.expiration;
 
   const maxRisk =
     rec.max_risk != null && rec.max_risk > 0
@@ -197,8 +247,15 @@ export default function TradeCard({ rec }: { rec: Recommendation }) {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span
+            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${executeMeta.styles}`}
+            title="Should you actually take it?"
+          >
+            <span className={`inline-flex h-1.5 w-1.5 rounded-full ${executeMeta.dot}`} />
+            {executeMeta.label}
+          </span>
+          <span
             className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${RATING_STYLES[rating]}`}
-            title="Should you do it?"
+            title="Quality rating"
           >
             {rating}
           </span>
@@ -211,10 +268,30 @@ export default function TradeCard({ rec }: { rec: Recommendation }) {
         </div>
       </div>
 
+      <div
+        className={`flex flex-wrap items-baseline justify-between gap-2 border-b border-white/5 px-4 py-3 sm:px-6 ${
+          executeVerdict === "Take It"
+            ? "bg-bull-500/5"
+            : executeVerdict === "Small Size"
+            ? "bg-amber-400/5"
+            : executeVerdict === "Watchlist"
+            ? "bg-orange-500/5"
+            : "bg-bear-500/5"
+        }`}
+      >
+        <div className="text-[11px] uppercase tracking-widest text-gray-400">
+          Should you do it?
+        </div>
+        <div className="text-sm text-gray-200">
+          <span className="font-semibold text-white">{executeMeta.label}</span>
+          <span className="text-gray-400"> — {executeMeta.blurb}</span>
+        </div>
+      </div>
+
       <div className="px-4 py-6 sm:px-8 sm:py-8">
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 sm:gap-x-4">
           <div className="text-4xl font-semibold tracking-tight text-white sm:text-5xl">
-            {rec.asset}
+            {isPlaceholder ? "—" : rec.asset}
           </div>
           <div
             className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-widest ${

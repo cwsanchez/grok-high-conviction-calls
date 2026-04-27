@@ -60,6 +60,21 @@ function TradeRow({ r }: { r: Recommendation }) {
           >
             {r.type?.toUpperCase()}
           </span>
+          {r.execute_verdict && (
+            <span
+              className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest ring-1 ${
+                r.execute_verdict === "Take It"
+                  ? "bg-bull-500/15 text-bull-500 ring-bull-500/30"
+                  : r.execute_verdict === "Small Size"
+                  ? "bg-amber-400/15 text-amber-300 ring-amber-400/30"
+                  : r.execute_verdict === "Watchlist"
+                  ? "bg-orange-500/15 text-orange-300 ring-orange-500/30"
+                  : "bg-bear-500/15 text-bear-500 ring-bear-500/30"
+              }`}
+            >
+              {r.execute_verdict}
+            </span>
+          )}
           {r.rating && (
             <span className="text-[11px] text-gray-400">· {r.rating}</span>
           )}
@@ -138,16 +153,21 @@ function WeekAccordion({
   defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(Boolean(defaultOpen));
+  // Legacy NONE rows are filtered out entirely; new "Pass" rows still render
+  // (as transparency-only ideas) but don't count toward W/L stats.
   const realTrades = group.trades.filter(
     (t) =>
       t.asset !== "NONE" &&
       t.type !== "none" &&
-      t.performance_status !== "no_trade"
+      (t.type ?? "").trim() !== ""
+  );
+  const tradesForStats = realTrades.filter(
+    (t) => t.execute_verdict !== "Pass" && t.performance_status !== "no_trade"
   );
 
-  const wins = realTrades.filter((t) => t.performance_status === "win").length;
-  const losses = realTrades.filter((t) => t.performance_status === "loss").length;
-  const pending = realTrades.filter(
+  const wins = tradesForStats.filter((t) => t.performance_status === "win").length;
+  const losses = tradesForStats.filter((t) => t.performance_status === "loss").length;
+  const pending = tradesForStats.filter(
     (t) =>
       !t.performance_status ||
       t.performance_status === "pending" ||
@@ -155,8 +175,12 @@ function WeekAccordion({
   ).length;
 
   const titleSummary = group.is_no_trade_week
-    ? "No trades — Limited opportunities"
-    : `${realTrades.length} trade${realTrades.length === 1 ? "" : "s"}`;
+    ? group.weekly_verdict
+      ? `${group.weekly_verdict} — transparency only`
+      : "No trades — Limited opportunities"
+    : `${realTrades.length} trade${realTrades.length === 1 ? "" : "s"}${
+        group.weekly_verdict ? ` · ${group.weekly_verdict}` : ""
+      }`;
 
   return (
     <div className="glass overflow-hidden rounded-2xl ring-1 ring-white/5">
@@ -223,12 +247,20 @@ function WeekAccordion({
               <div className="mt-1">{group.market_view}</div>
             </div>
           )}
-          {group.is_no_trade_week ? (
+          {group.weekly_verdict_summary && (
+            <div className="mb-4 rounded-lg bg-ink-700/30 p-3 text-xs leading-5 text-gray-300 ring-1 ring-white/5">
+              <div className="text-[10px] font-semibold uppercase tracking-widest text-gray-500">
+                Weekly verdict — {group.weekly_verdict ?? "—"}
+              </div>
+              <div className="mt-1">{group.weekly_verdict_summary}</div>
+            </div>
+          )}
+          {realTrades.length === 0 ? (
             <div className="rounded-xl bg-ink-800/50 p-4 text-sm text-gray-300 ring-1 ring-white/5">
-              <div className="font-semibold text-white">Limited Opportunities</div>
+              <div className="font-semibold text-white">No trades recorded</div>
               <div className="mt-1 text-xs leading-6 text-gray-400 wrap-anywhere">
                 {group.trades[0]?.reasoning ??
-                  "Fewer than 2 trades passed our 7-of-8 checklist."}
+                  "This week was logged as a sit-out by the system."}
               </div>
             </div>
           ) : (

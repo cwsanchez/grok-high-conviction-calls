@@ -1,34 +1,43 @@
 # grok-high-conviction-calls
 
-**AI-Powered Weekly High-Conviction Options Advisor**
+**AI-Powered Weekly Options Advisor — Top 3 Trades, Always, with an Honest Verdict**
 
-A simple, transparent Next.js 14 web app that uses Grok + a strict 8-point checklist to publish the **Top 3 high-conviction options trades** every week — or, when fewer than 2 setups qualify, no trades at all.
+A transparent Next.js 14 web app that uses Grok and five debating AI agents to publish the **Top 3 options trade ideas every week** — *and* a clear, plain-English call on whether this week is actually a good week to execute on them.
 
 ## How It Works
 
-1. **Every Sunday at 8:00 PM Mountain Time** a Vercel Cron Job calls `/api/cron/weekly`. A second daily catch-up cron also fires every weekday morning (8 AM MT) and is a no-op if the current week already has recommendations — so if the Sunday run fails or is delayed, the analysis self-heals on the next available day, with prompts tuned for the shorter holding window.
-2. Four AI agents — **Bull**, **Bear**, **Risk**, **Historian** — independently analyze the 12-asset universe using `grok-4-1-fast-reasoning`.
-3. A **Judge** prompt synthesizes their reports, applies an 8-point checklist to every candidate, and returns the **top 3 ranked trades** (or fewer if fewer qualify):
-   1. Multi-timeframe trend alignment (above 20/50/200-day MA)
-   2. Strong momentum (RSI 55–75 + positive MACD)
-   3. Favorable IV Rank (25–55)
-   4. High options liquidity (>50k contracts)
-   5. No major binary events in next 10 days
-   6. Positive sentiment from ≥3 sources
-   7. Favorable historical pattern match (>58% success rate)
-   8. Final confidence ≥ 80/100
-4. **At least 7 of 8 must pass** for a trade to be included.
-5. If fewer than 2 trades qualify, the site shows *“Limited Opportunities This Week”* instead of forcing trades.
-6. Each previous week’s trades are retroactively scored and a one-sentence price-movement summary is saved.
+1. **Every Sunday at 8:00 PM Mountain Time** a Vercel Cron Job calls `/api/cron/weekly`. A second daily catch-up cron fires every weekday morning (8 AM MT) and is a no-op if the current week already has recommendations — so if the Sunday run fails or is delayed, the analysis self-heals on the next available day, with prompts tuned for the shorter holding window.
+2. Four research agents — **Bull**, **Bear**, **Risk**, and **Historian** — independently analyze the 12-asset universe using `grok-4-1-fast-reasoning`. They are encouraged to research broadly: news, sector rotation, sentiment, options flow, analyst commentary, seasonality, and historical analogs.
+3. A **Debate** agent runs a focused back-and-forth over the strongest tickers, producing per-ticker bull case / bear case / resolution and an overall *week quality* (strong / mixed / caution / avoid).
+4. A **Judge** synthesizes everything into the **TOP 3 trades, always** — ranked best-first. Even in a quiet tape, the system surfaces the best 3 ideas the agents debated so you always have something concrete to look at.
+5. The Judge also produces:
+   - A **Weekly Verdict** — `Strong Week` / `Solid` / `Mixed` / `Caution` / `Sit Out` — that tells you, plainly, whether this week is good to execute on.
+   - A per-trade **Execute Verdict** — `Take It` / `Small Size` / `Watchlist` / `Pass` — that tells you whether to actually take that specific trade or just watch it.
+6. The 8-point quality checklist (below) is now used as **input** to scoring, not as a hard gate. Trades that miss several checks can still appear, but their rating, execute verdict, and weekly verdict will reflect this.
+7. Each previous week's trades are retroactively scored and a one-sentence price-movement summary is saved.
 
-Default strongly to **long calls**. Long puts only in extremely clear and strong bearish conditions (target frequency <10% of weeks).
+8-point Quality Checklist (informational, not a hard gate):
+
+1. Multi-timeframe trend alignment (above 20/50/200-day MA)
+2. Strong momentum (RSI 55–75 + positive MACD)
+3. Favorable IV Rank (25–55)
+4. High options liquidity (>50k contracts)
+5. No major binary events in next 10 days
+6. Positive sentiment from ≥3 sources
+7. Favorable historical pattern match (>58% success rate)
+8. Final confidence ≥ 80/100
+
+Default strongly to **long calls**. Long puts only in clearly bearish conditions (target frequency <20% of weeks).
 
 ## Trade Display
+
+The page is anchored by a **Weekly Verdict banner** that tells you up-front whether this week is good to execute on, and which (if any) of the 3 trades are worth actually taking.
 
 Each of the top 3 trades is shown with:
 
 - Rank ribbon (#1 Best, #2, #3)
-- “Should you do it?” rating: **Strong Buy / Moderate / Weak / Skip**
+- **Execute Verdict** badge: **Take It / Small Size / Watchlist / Pass**
+- Quality Rating: **Strong Buy / Moderate / Weak / Skip**
 - Strength Score 1–10 (gradient meter)
 - All trade details: Ticker, Type (Call/Put), Strike, Expiration, Limit Buy Price, Profit Target, Stop Loss, Max Risk ($), Confidence %
 - “Why this ranks here” callout

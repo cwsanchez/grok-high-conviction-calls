@@ -19,6 +19,13 @@ export type TradeType = "CALL" | "PUT";
 
 export type TradeRating = "Strong Buy" | "Moderate" | "Weak" | "Skip";
 export type RiskLevel = "Low" | "Medium" | "High";
+export type ExecuteVerdict = "Take It" | "Small Size" | "Watchlist" | "Pass";
+export type WeeklyVerdict =
+  | "Strong Week"
+  | "Solid"
+  | "Mixed"
+  | "Caution"
+  | "Sit Out";
 
 export interface ChecklistItem {
   pass: boolean;
@@ -57,6 +64,7 @@ export interface RankedTrade {
   confidence: number;
   strength_score: number;
   rating: TradeRating;
+  execute_verdict: ExecuteVerdict;
   risk_level: RiskLevel;
   rank_explanation: string;
   reasoning: string;
@@ -68,7 +76,8 @@ export interface FinalAnalysis {
   trades: RankedTrade[];
   market_view: string;
   market_regime: string;
-  why_no_trades?: string;
+  weekly_verdict: WeeklyVerdict;
+  weekly_verdict_summary: string;
 }
 
 export interface Recommendation {
@@ -99,6 +108,11 @@ export interface Recommendation {
   market_regime: string | null;
   checklist_passed_count: number | null;
   created_at: string | null;
+  // Derived (parsed from encoded prefixes in `rank_explanation` / `market_view`).
+  // Persisted via tag-prefix encoding so we don't need a DB migration.
+  execute_verdict?: ExecuteVerdict | null;
+  weekly_verdict?: WeeklyVerdict | null;
+  weekly_verdict_summary?: string | null;
 }
 
 export interface MarketState {
@@ -113,5 +127,8 @@ export interface WeekGroup {
   trades: Recommendation[];
   market_view: string | null;
   market_regime: string | null;
+  weekly_verdict: WeeklyVerdict | null;
+  weekly_verdict_summary: string | null;
+  // True if EVERY trade in the week is verdict "Pass" (effectively a sit-out week).
   is_no_trade_week: boolean;
 }
