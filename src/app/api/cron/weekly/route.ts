@@ -81,7 +81,7 @@ async function runJob() {
         {
           week_start: weekStart,
           asset: final.asset,
-          type: final.type,
+          type: (final.type ?? "").toLowerCase(),
           strike: final.strike ?? 0,
           expiration: final.expiration,
           entry_price: final.entry_price ?? 0,
@@ -109,7 +109,7 @@ async function runJob() {
       {
         week_start: weekStart,
         asset: "NONE",
-        type: "NONE",
+        type: "none",
         strike: 0,
         expiration: weekStart,
         entry_price: 0,

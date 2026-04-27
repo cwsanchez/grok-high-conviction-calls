@@ -30,7 +30,8 @@ export default function MarketView({
 
 function inferRegimeFromRec(rec: Recommendation | null): string | null {
   if (!rec) return null;
-  if (rec.type === "CALL") return "bull";
-  if (rec.type === "PUT") return "bear";
+  const t = (rec.type ?? "").toLowerCase();
+  if (t === "call") return "bull";
+  if (t === "put") return "bear";
   return null;
 }

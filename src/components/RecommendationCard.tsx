@@ -56,11 +56,12 @@ export default function RecommendationCard({
 }: {
   rec: Recommendation | null;
 }) {
-  if (!rec || rec.asset === "NONE" || rec.type === "NONE") {
+  const t = (rec?.type ?? "").toLowerCase();
+  if (!rec || rec.asset === "NONE" || t === "none" || t === "" || t === "no_trade") {
     return <NoTradeCard rec={rec} />;
   }
 
-  const isCall = rec.type.toUpperCase() === "CALL";
+  const isCall = t === "call";
   const accent = isCall ? "bull" : "bear";
 
   return (
@@ -101,7 +102,7 @@ export default function RecommendationCard({
                 : "bg-bear-500/15 text-bear-500"
             }`}
           >
-            {rec.type}
+            {rec.type.toUpperCase()}
           </div>
           <div className="text-sm text-gray-400">
             Confidence:{" "}

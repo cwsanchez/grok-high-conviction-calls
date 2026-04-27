@@ -61,7 +61,9 @@ export default function HistoryTable({ rows }: { rows: Recommendation[] }) {
             </thead>
             <tbody className="divide-y divide-white/5">
               {rows.map((r) => {
-                const isNoTrade = r.asset === "NONE" || r.type === "NONE";
+                const t = (r.type ?? "").toLowerCase();
+                const isNoTrade =
+                  r.asset === "NONE" || t === "none" || t === "" || t === "no_trade";
                 const pnlPerContract =
                   r.actual_pnl != null ? r.actual_pnl * 100 : null;
                 return (
@@ -78,12 +80,10 @@ export default function HistoryTable({ rows }: { rows: Recommendation[] }) {
                       ) : (
                         <span
                           className={
-                            r.type.toUpperCase() === "CALL"
-                              ? "text-bull-500"
-                              : "text-bear-500"
+                            t === "call" ? "text-bull-500" : "text-bear-500"
                           }
                         >
-                          {r.type}
+                          {r.type.toUpperCase()}
                         </span>
                       )}
                     </td>
