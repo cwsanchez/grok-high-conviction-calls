@@ -27,6 +27,8 @@ export default async function Page() {
     trades: [],
     market_view: null,
     market_regime: null,
+    weekly_verdict: null,
+    weekly_verdict_summary: null,
   };
   let history: Awaited<ReturnType<typeof fetchHistoryGrouped>> = [];
   let market = null;
@@ -53,7 +55,7 @@ export default async function Page() {
                 Grok High-Conviction
               </div>
               <div className="text-xs text-gray-400">
-                Top 3 disciplined trades each week. Or none at all.
+                Top 3 trades every week — and an honest call on whether to take them.
               </div>
             </div>
           </div>
@@ -63,12 +65,13 @@ export default async function Page() {
 
       <section className="mb-8 text-center sm:mb-10">
         <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-5xl">
-          This Week&rsquo;s Top 3 High-Conviction Trades
+          This Week&rsquo;s Top 3 Trades
         </h1>
         <p className="mx-auto mt-3 max-w-2xl text-sm text-gray-400 sm:mt-4 sm:text-base">
-          Four competing AI agents debate every Sunday night. Only setups that
-          pass at least 7 of 8 strict filters become a trade. Most weeks: only a
-          handful qualify.
+          Five AI agents — Bull, Bear, Risk, Historian, and Debate — research,
+          challenge, and rank the best three options setups every week. The
+          weekly verdict tells you, plainly, whether this week is good to
+          execute on.
         </p>
       </section>
 
@@ -79,7 +82,12 @@ export default async function Page() {
         </div>
       ) : (
         <>
-          <TopTrades trades={latest.trades} weekStart={latest.week_start} />
+          <TopTrades
+            trades={latest.trades}
+            weekStart={latest.week_start}
+            weeklyVerdict={latest.weekly_verdict}
+            weeklyVerdictSummary={latest.weekly_verdict_summary}
+          />
           <MarketView
             state={market}
             view={latest.market_view}
